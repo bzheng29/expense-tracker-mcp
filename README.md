@@ -18,7 +18,7 @@ A comprehensive expense tracking MCP server for Claude Desktop with 8 profession
 3. **analyze_spending** - Category breakdown, trends, and budget variance
 4. **get_summary** - Period totals, budget status, quick stats
 5. **get_record_details** - Detailed record information with related data
-6. **get_ai_insights** - AI-powered recommendations and alerts
+6. **get_insights_data** - Comprehensive data for AI analysis and insights
 7. **batch_create_transactions** - Bulk transaction creation
 8. **export_data** - Flexible data export in multiple formats
 
@@ -97,10 +97,17 @@ analyze_spending({
   period: { start: '2024-01-01', end: '2024-01-31' }
 })
 
-// Get AI insights for overspending
-get_ai_insights({
-  insight_type: 'spending_alerts',
-  context: { period: 'this_month' }
+// Get rich data for AI insights
+get_insights_data({
+  data_scope: 'spending_patterns',
+  period: {
+    current: { start: '2024-01-01', end: '2024-01-31' },
+    comparison: { start: '2023-12-01', end: '2023-12-31' }
+  },
+  include_components: {
+    statistics: true,
+    historical_averages: true
+  }
 })
 ```
 

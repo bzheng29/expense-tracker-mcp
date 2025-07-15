@@ -87,15 +87,6 @@ async function initDatabase() {
     )
   `);
 
-  await dbRun(`
-    CREATE TABLE IF NOT EXISTS ai_insights (
-      id TEXT PRIMARY KEY,
-      insight_type TEXT NOT NULL,
-      content TEXT NOT NULL,
-      metadata TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
 
   const userCount = await dbGet('SELECT COUNT(*) as count FROM users');
   if (userCount.count === 0) {
@@ -172,33 +163,6 @@ async function initDatabase() {
       );
     }
 
-    const aiInsights = [
-      {
-        id: 'insight_001',
-        insight_type: 'spending_alert',
-        content: 'Your dining expenses are 25% higher than last month. Consider meal planning to reduce restaurant visits.',
-        metadata: JSON.stringify({ category: 'food', increase_percentage: 25, period: 'monthly' })
-      },
-      {
-        id: 'insight_002',
-        insight_type: 'budget_suggestion',
-        content: 'Based on your spending patterns, consider increasing your entertainment budget by $50/month.',
-        metadata: JSON.stringify({ category: 'entertainment', suggested_increase: 50, confidence: 0.85 })
-      },
-      {
-        id: 'insight_003',
-        insight_type: 'saving_opportunity',
-        content: 'You could save $120/month by switching to a different internet provider based on your usage patterns.',
-        metadata: JSON.stringify({ category: 'utilities', potential_savings: 120, suggestion: 'provider_switch' })
-      }
-    ];
-
-    for (const insight of aiInsights) {
-      await dbRun(
-        "INSERT INTO ai_insights (id, insight_type, content, metadata) VALUES (?, ?, ?, ?)",
-        [insight.id, insight.insight_type, insight.content, insight.metadata]
-      );
-    }
 
     console.error('Database initialized with sample data');
   }
@@ -449,36 +413,61 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'get_ai_insights',
-        description: 'Access AI-powered insights and recommendations',
+        name: 'get_insights_data',
+        description: 'Retrieve comprehensive data for AI analysis and insights generation',
         inputSchema: {
           type: 'object',
           properties: {
-            insight_type: {
+            data_scope: {
               type: 'string',
-              enum: ['budget_suggestions', 'spending_alerts', 'saving_opportunities'],
-              description: 'Type of AI insight to retrieve'
+              enum: ['spending_patterns', 'budget_analysis', 'anomaly_detection', 'savings_potential'],
+              description: 'Type of data analysis to prepare'
             },
-            context: {
+            period: {
               type: 'object',
               properties: {
-                period: {
-                  type: 'string',
-                  description: 'Time period for analysis (e.g., "this_month", "last_3_months")'
+                current: {
+                  type: 'object',
+                  properties: {
+                    start: { type: 'string', description: 'Start date (ISO format)' },
+                    end: { type: 'string', description: 'End date (ISO format)' }
+                  },
+                  required: ['start', 'end']
                 },
-                categories: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Focus on specific categories'
+                comparison: {
+                  type: 'object',
+                  properties: {
+                    start: { type: 'string', description: 'Comparison period start date' },
+                    end: { type: 'string', description: 'Comparison period end date' }
+                  },
+                  required: ['start', 'end']
+                }
+              },
+              required: ['current']
+            },
+            include_components: {
+              type: 'object',
+              properties: {
+                transactions: {
+                  type: 'boolean',
+                  description: 'Include raw transaction samples'
                 },
-                threshold: {
-                  type: 'number',
-                  description: 'Threshold for alerts (e.g., amount)'
+                statistics: {
+                  type: 'boolean',
+                  description: 'Include statistical measures'
+                },
+                historical_averages: {
+                  type: 'boolean',
+                  description: 'Include historical average comparisons'
+                },
+                peer_comparison: {
+                  type: 'boolean',
+                  description: 'Include anonymized peer data if available'
                 }
               }
             }
           },
-          required: ['insight_type']
+          required: ['data_scope', 'period']
         }
       },
       {
@@ -1130,38 +1119,368 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      case 'get_ai_insights': {
-        const { insight_type, context = {} } = args;
+      case 'get_insights_data': {
+        const { data_scope, period, include_components = {} } = args;
+        const { current, comparison } = period;
         
-        let query = 'SELECT * FROM ai_insights WHERE insight_type = ?';
-        const params = [insight_type];
+        let result = {
+          data_scope,
+          period,
+          analysis_data: {},
+          generated_at: new Date().toISOString()
+        };
         
-        if (context.categories && context.categories.length > 0) {
-          query += ' AND JSON_EXTRACT(metadata, "$.category") IN (' + 
-                   context.categories.map(() => '?').join(',') + ')';
-          params.push(...context.categories);
+        switch (data_scope) {
+          case 'spending_patterns': {
+            // Current period spending by category
+            const currentSpending = await dbAll(`
+              SELECT c.name as category, c.id as category_id, c.type,
+                     SUM(t.amount) as total_amount,
+                     COUNT(t.id) as transaction_count,
+                     AVG(t.amount) as avg_amount,
+                     MIN(t.amount) as min_amount,
+                     MAX(t.amount) as max_amount,
+                     strftime('%w', t.date) as day_of_week
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+              GROUP BY c.id, c.name, c.type
+              ORDER BY total_amount DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.current_spending = currentSpending;
+            
+            // Comparison period if provided
+            if (comparison) {
+              const comparisonSpending = await dbAll(`
+                SELECT c.name as category, c.id as category_id, c.type,
+                       SUM(t.amount) as total_amount,
+                       COUNT(t.id) as transaction_count,
+                       AVG(t.amount) as avg_amount
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                GROUP BY c.id, c.name, c.type
+                ORDER BY total_amount DESC
+              `, [comparison.start, comparison.end]);
+              
+              result.analysis_data.comparison_spending = comparisonSpending;
+              
+              // Calculate changes
+              const changes = currentSpending.map(curr => {
+                const prev = comparisonSpending.find(p => p.category_id === curr.category_id);
+                if (prev) {
+                  return {
+                    category: curr.category,
+                    current_amount: curr.total_amount,
+                    previous_amount: prev.total_amount,
+                    change_amount: curr.total_amount - prev.total_amount,
+                    change_percentage: prev.total_amount > 0 ? 
+                      ((curr.total_amount - prev.total_amount) / prev.total_amount * 100).toFixed(2) : 0
+                  };
+                }
+                return {
+                  category: curr.category,
+                  current_amount: curr.total_amount,
+                  previous_amount: 0,
+                  change_amount: curr.total_amount,
+                  change_percentage: 100
+                };
+              });
+              
+              result.analysis_data.spending_changes = changes;
+            }
+            
+            // Daily spending patterns
+            const dailySpending = await dbAll(`
+              SELECT DATE(t.date) as date,
+                     SUM(t.amount) as daily_total,
+                     COUNT(t.id) as transaction_count,
+                     strftime('%w', t.date) as day_of_week
+              FROM transactions t
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+              GROUP BY DATE(t.date)
+              ORDER BY t.date
+            `, [current.start, current.end]);
+            
+            result.analysis_data.daily_patterns = dailySpending;
+            
+            // Frequency patterns
+            const frequencyData = await dbAll(`
+              SELECT c.name as category,
+                     COUNT(t.id) as frequency,
+                     AVG(t.amount) as avg_amount,
+                     SUM(t.amount) as total_amount
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+              GROUP BY c.id, c.name
+              HAVING frequency > 1
+              ORDER BY frequency DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.frequency_patterns = frequencyData;
+            break;
+          }
+          
+          case 'budget_analysis': {
+            // Budget vs actual analysis
+            const budgetAnalysis = await dbAll(`
+              SELECT b.*, c.name as category_name,
+                     COALESCE(SUM(t.amount), 0) as actual_spent,
+                     b.amount - COALESCE(SUM(t.amount), 0) as remaining,
+                     CASE 
+                       WHEN b.amount > 0 THEN (COALESCE(SUM(t.amount), 0) / b.amount * 100)
+                       ELSE 0
+                     END as percentage_used
+              FROM budgets b
+              JOIN categories c ON b.category_id = c.id
+              LEFT JOIN transactions t ON t.category_id = c.id 
+                AND t.date >= ? AND t.date <= ?
+                AND t.type = 'expense'
+              WHERE b.active = 1
+              GROUP BY b.id
+              ORDER BY percentage_used DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.budget_performance = budgetAnalysis;
+            
+            // Budget adherence over time
+            const budgetTrends = await dbAll(`
+              SELECT DATE(t.date) as date,
+                     c.name as category,
+                     SUM(t.amount) as daily_spent,
+                     b.amount as budget_amount
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              JOIN budgets b ON b.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                AND b.active = 1
+              GROUP BY DATE(t.date), c.id, c.name, b.amount
+              ORDER BY t.date, c.name
+            `, [current.start, current.end]);
+            
+            result.analysis_data.budget_trends = budgetTrends;
+            
+            // Forecast based on current spending rate
+            const daysInPeriod = Math.ceil((new Date(current.end) - new Date(current.start)) / (1000 * 60 * 60 * 24)) + 1;
+            const forecasts = budgetAnalysis.map(b => ({
+              category: b.category_name,
+              budget_amount: b.amount,
+              actual_spent: b.actual_spent,
+              daily_rate: b.actual_spent / daysInPeriod,
+              projected_monthly: (b.actual_spent / daysInPeriod) * 30,
+              forecast_status: (b.actual_spent / daysInPeriod) * 30 > b.amount ? 'over_budget' : 'on_track'
+            }));
+            
+            result.analysis_data.spending_forecasts = forecasts;
+            break;
+          }
+          
+          case 'anomaly_detection': {
+            // Statistical outliers - transactions significantly above average
+            const averagesByCategory = await dbAll(`
+              SELECT c.name as category,
+                     AVG(t.amount) as avg_amount,
+                     (AVG(t.amount) * 2) as outlier_threshold
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.type = 'expense'
+              GROUP BY c.id, c.name
+            `);
+            
+            result.analysis_data.category_averages = averagesByCategory;
+            
+            // Find outlier transactions
+            const outliers = await dbAll(`
+              SELECT t.*, c.name as category_name,
+                     (SELECT AVG(amount) FROM transactions t2 WHERE t2.category_id = t.category_id) as category_avg
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                AND t.amount > (SELECT AVG(amount) * 2 FROM transactions t2 WHERE t2.category_id = t.category_id)
+              ORDER BY t.amount DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.outlier_transactions = outliers;
+            
+            // Unusual spending spikes by day
+            const dailySpikes = await dbAll(`
+              SELECT DATE(t.date) as date,
+                     SUM(t.amount) as daily_total,
+                     (SELECT AVG(daily_sum) FROM (
+                       SELECT SUM(amount) as daily_sum
+                       FROM transactions 
+                       WHERE type = 'expense' AND date < ?
+                       GROUP BY DATE(date)
+                     )) as historical_daily_avg
+              FROM transactions t
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+              GROUP BY DATE(t.date)
+              HAVING daily_total > historical_daily_avg * 1.5
+              ORDER BY daily_total DESC
+            `, [current.start, current.start, current.end]);
+            
+            result.analysis_data.spending_spikes = dailySpikes;
+            
+            // Unusual patterns - new merchants/categories
+            const newMerchants = await dbAll(`
+              SELECT t.description, COUNT(*) as frequency, SUM(t.amount) as total
+              FROM transactions t
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                AND t.description NOT IN (
+                  SELECT DISTINCT description 
+                  FROM transactions 
+                  WHERE date < ? AND type = 'expense'
+                )
+              GROUP BY t.description
+              ORDER BY total DESC
+            `, [current.start, current.end, current.start]);
+            
+            result.analysis_data.new_merchants = newMerchants;
+            break;
+          }
+          
+          case 'savings_potential': {
+            // Recurring charges analysis
+            const recurringCharges = await dbAll(`
+              SELECT t.description, 
+                     COUNT(*) as frequency,
+                     AVG(t.amount) as avg_amount,
+                     SUM(t.amount) as total_amount,
+                     c.name as category
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.type = 'expense'
+              GROUP BY t.description, c.name
+              HAVING frequency >= 2
+              ORDER BY total_amount DESC
+            `);
+            
+            result.analysis_data.recurring_charges = recurringCharges;
+            
+            // Category comparison with potential savings
+            const categoryAnalysis = await dbAll(`
+              SELECT c.name as category,
+                     SUM(t.amount) as total_spent,
+                     COUNT(t.id) as transaction_count,
+                     AVG(t.amount) as avg_transaction,
+                     MAX(t.amount) as max_transaction
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+              GROUP BY c.id, c.name
+              ORDER BY total_spent DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.category_analysis = categoryAnalysis;
+            
+            // High-frequency low-value transactions (potential for consolidation)
+            const microTransactions = await dbAll(`
+              SELECT c.name as category,
+                     COUNT(*) as frequency,
+                     SUM(t.amount) as total_amount,
+                     AVG(t.amount) as avg_amount
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                AND t.amount < 20
+              GROUP BY c.id, c.name
+              HAVING frequency >= 5
+              ORDER BY total_amount DESC
+            `, [current.start, current.end]);
+            
+            result.analysis_data.micro_transactions = microTransactions;
+            
+            // Subscription and service analysis
+            const subscriptionKeywords = ['subscription', 'monthly', 'annual', 'service', 'premium', 'plus'];
+            const keywordPattern = subscriptionKeywords.map(() => 'LOWER(t.description) LIKE ?').join(' OR ');
+            const keywordParams = subscriptionKeywords.map(keyword => `%${keyword}%`);
+            
+            const subscriptionAnalysis = await dbAll(`
+              SELECT t.description,
+                     COUNT(*) as frequency,
+                     AVG(t.amount) as avg_amount,
+                     SUM(t.amount) as total_amount,
+                     c.name as category
+              FROM transactions t
+              JOIN categories c ON t.category_id = c.id
+              WHERE t.date >= ? AND t.date <= ? AND t.type = 'expense'
+                AND (${keywordPattern})
+              GROUP BY t.description, c.name
+              ORDER BY total_amount DESC
+            `, [current.start, current.end, ...keywordParams]);
+            
+            result.analysis_data.potential_subscriptions = subscriptionAnalysis;
+            break;
+          }
         }
         
-        if (context.threshold) {
-          query += ' AND JSON_EXTRACT(metadata, "$.threshold") <= ?';
-          params.push(context.threshold);
+        // Add optional components
+        if (include_components.transactions) {
+          const sampleTransactions = await dbAll(`
+            SELECT t.*, c.name as category_name, l.name as ledger_name
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            JOIN ledgers l ON t.ledger_id = l.id
+            WHERE t.date >= ? AND t.date <= ?
+            ORDER BY t.date DESC
+            LIMIT 20
+          `, [current.start, current.end]);
+          
+          result.analysis_data.sample_transactions = sampleTransactions;
         }
         
-        query += ' ORDER BY created_at DESC';
+        if (include_components.statistics) {
+          const statistics = await dbGet(`
+            SELECT 
+              SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as total_expenses,
+              SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as total_income,
+              COUNT(CASE WHEN type = 'expense' THEN 1 END) as expense_count,
+              COUNT(CASE WHEN type = 'income' THEN 1 END) as income_count,
+              AVG(CASE WHEN type = 'expense' THEN amount END) as avg_expense,
+              MAX(CASE WHEN type = 'expense' THEN amount END) as max_expense,
+              MIN(CASE WHEN type = 'expense' THEN amount END) as min_expense
+            FROM transactions
+            WHERE date >= ? AND date <= ?
+          `, [current.start, current.end]);
+          
+          result.analysis_data.period_statistics = statistics;
+        }
         
-        const insights = await dbAll(query, params);
+        if (include_components.historical_averages) {
+          const historicalAverages = await dbAll(`
+            SELECT c.name as category,
+                   AVG(t.amount) as historical_avg,
+                   COUNT(t.id) as historical_count
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.date < ? AND t.type = 'expense'
+            GROUP BY c.id, c.name
+            ORDER BY historical_avg DESC
+          `, [current.start]);
+          
+          result.analysis_data.historical_averages = historicalAverages;
+        }
         
-        const result = insights.map(insight => ({
-          ...insight,
-          metadata: JSON.parse(insight.metadata || '{}')
-        }));
+        if (include_components.peer_comparison) {
+          // Mock peer data - in real implementation this would come from anonymized aggregate data
+          result.analysis_data.peer_comparison = {
+            note: "Peer comparison data not available in this implementation",
+            mock_data: {
+              avg_monthly_expenses: 2800,
+              common_categories: ["Food", "Transportation", "Utilities", "Entertainment"],
+              typical_ranges: {
+                "Food": { min: 400, max: 800 },
+                "Transportation": { min: 200, max: 500 },
+                "Utilities": { min: 150, max: 400 }
+              }
+            }
+          };
+        }
         
         return {
-          content: [{ type: 'text', text: JSON.stringify({
-            insights: result,
-            context,
-            generated_at: new Date().toISOString()
-          }, null, 2) }]
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
         };
       }
 
