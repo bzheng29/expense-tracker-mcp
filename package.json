@@ -1,13 +1,13 @@
 {
   "name": "expense-tracker-mcp-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "A modular, database-agnostic MCP server for expense tracking with comprehensive financial analysis capabilities.",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["mcp", "expense-tracker", "finance", "sqlite", "database"],
   "author": "",
   "license": "ISC",
   "type": "module",

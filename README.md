@@ -1,15 +1,17 @@
 # Expense Tracker MCP Server
 
-A comprehensive expense tracking MCP server for Claude Desktop with 8 professional-grade tools based on simplified design principles.
+A comprehensive expense tracking MCP server for Claude Desktop with 8 professional-grade tools based on simplified design principles and modular architecture.
 
 ## 🚀 Features
 
 - **8 Core Tools**: From basic queries to AI-powered insights
+- **Modular Architecture**: Clean separation of concerns with pluggable database support
+- **Database Agnostic**: Support for SQLite (implemented), PostgreSQL, MongoDB, and MySQL (planned)
 - **Hierarchical Categories**: Organized expense/income categories with Markdown tree view
 - **Advanced Analytics**: Category breakdown, time trends, budget variance analysis
 - **Flexible Exports**: JSON, CSV, and Markdown report formats
 - **Batch Operations**: Efficient bulk transaction creation with validation
-- **AI Insights**: Smart spending alerts and budget suggestions
+- **Configuration Management**: Environment variable support and validation
 
 ## 🛠️ Tools
 
@@ -21,6 +23,63 @@ A comprehensive expense tracking MCP server for Claude Desktop with 8 profession
 6. **get_insights_data** - Comprehensive data for AI analysis and insights
 7. **batch_create_transactions** - Bulk transaction creation
 8. **export_data** - Flexible data export in multiple formats
+
+## 🏗️ Architecture
+
+The server follows a modular architecture with clean separation of concerns:
+
+```
+expense-tracker-mcp/
+├── server.js                 # Main server entry point
+├── src/
+│   ├── config.js             # Configuration management
+│   ├── database/
+│   │   ├── interface.js      # Database abstraction interface
+│   │   ├── factory.js        # Database factory pattern
+│   │   ├── sqlite-adapter.js # SQLite implementation
+│   │   └── sqlite-methods.js # Extended SQLite methods
+│   ├── tools/
+│   │   ├── definitions.js    # MCP tool schemas
+│   │   └── handlers.js       # Tool implementation handlers
+│   └── utils/
+│       └── helpers.js        # Utility functions
+└── package.json
+```
+
+### Database Abstraction
+
+The server uses a database abstraction layer that allows easy switching between different database backends:
+
+- **SQLite**: Production-ready implementation (default)
+- **PostgreSQL**: Planned - enterprise-grade support
+- **MongoDB**: Planned - document-based storage
+- **MySQL**: Planned - relational database alternative
+
+### Configuration
+
+Environment variables are supported for all configuration options:
+
+```bash
+# Database configuration
+DB_TYPE=sqlite              # Database type (sqlite, postgres, mongodb)
+DB_PATH=./expense_tracker.db # SQLite database path
+DB_HOST=localhost           # Database host (for postgres/mysql)
+DB_PORT=5432               # Database port
+DB_NAME=expense_tracker    # Database name
+DB_USER=postgres           # Database user
+DB_PASSWORD=               # Database password
+
+# Server configuration
+SERVER_NAME=expense-tracker
+SERVER_VERSION=1.0.0
+DEBUG=false
+
+# Application configuration
+DEFAULT_CURRENCY=USD
+MAX_TRANSACTION_BATCH=100
+MAX_QUERY_LIMIT=100
+SEED_DATA=true
+```
 
 ## 📋 Prerequisites
 
